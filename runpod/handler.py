@@ -1,10 +1,12 @@
 """
 RunPod Serverless Handler for HeartMuLa Music Generation
 
+Downloads model weights on first cold start, then caches them.
+
 Input format:
 {
     "input": {
-        "lyrics": "string - the lyrics text or path concept",
+        "lyrics": "string - the lyrics text",
         "tags": "string - comma-separated tags (optional, default: 'pop,upbeat')",
         "max_audio_length_ms": int - max audio length in ms (optional, default: 120000),
         "temperature": float - sampling temperature (optional, default: 1.0),
@@ -26,17 +28,59 @@ import os
 import sys
 import base64
 import tempfile
-import torch
-import runpod
+import subprocess
 
 # Add parent directory to path for heartlib imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from heartlib import HeartMuLaGenPipeline
+sys.path.insert(0, "/app")
+sys.path.insert(0, "/app/src")
 
 # Global model instance for warm starts
 MODEL = None
 MODEL_PATH = os.environ.get("MODEL_PATH", "/app/ckpt")
+
+
+def download_models():
+    """Download model weights from HuggingFace if not present."""
+
+    heartmula_path = os.path.join(MODEL_PATH, "HeartMuLa-oss-3B")
+    heartcodec_path = os.path.join(MODEL_PATH, "HeartCodec-oss")
+    tokenizer_path = os.path.join(MODEL_PATH, "tokenizer.json")
+
+    # Check if models already exist
+    if (os.path.exists(heartmula_path) and
+        os.path.exists(heartcodec_path) and
+        os.path.exists(tokenizer_path)):
+        print("Models already downloaded.")
+        return
+
+    print("Downloading model weights from HuggingFace...")
+
+    # Download HeartMuLaGen (tokenizer and config)
+    print("Downloading HeartMuLaGen base files...")
+    subprocess.run([
+        "huggingface-cli", "download",
+        "HeartMuLa/HeartMuLaGen",
+        "--local-dir", MODEL_PATH
+    ], check=True)
+
+    # Download HeartMuLa-oss-3B
+    print("Downloading HeartMuLa-oss-3B (this may take a while)...")
+    subprocess.run([
+        "huggingface-cli", "download",
+        "HeartMuLa/HeartMuLa-oss-3B",
+        "--local-dir", heartmula_path
+    ], check=True)
+
+    # Download HeartCodec-oss
+    print("Downloading HeartCodec-oss...")
+    subprocess.run([
+        "huggingface-cli", "download",
+        "HeartMuLa/HeartCodec-oss",
+        "--local-dir", heartcodec_path
+    ], check=True)
+
+    print("All models downloaded successfully!")
 
 
 def load_model():
@@ -45,6 +89,12 @@ def load_model():
 
     if MODEL is not None:
         return MODEL
+
+    # Download models if needed
+    download_models()
+
+    import torch
+    from heartlib import HeartMuLaGenPipeline
 
     print("Loading HeartMuLa model...")
 
@@ -75,6 +125,8 @@ def generate_music(lyrics: str, tags: str = "pop,upbeat", **kwargs) -> dict:
     Returns:
         dict with audio_base64, duration_ms, sample_rate, format
     """
+    import torch
+
     pipe = load_model()
 
     # Default parameters
@@ -108,13 +160,9 @@ def generate_music(lyrics: str, tags: str = "pop,upbeat", **kwargs) -> dict:
 
         audio_base64 = base64.b64encode(audio_data).decode("utf-8")
 
-        # Calculate approximate duration
-        # 48kHz sample rate, mp3 at ~128kbps
-        duration_ms = max_audio_length_ms  # Approximate
-
         return {
             "audio_base64": audio_base64,
-            "duration_ms": duration_ms,
+            "duration_ms": max_audio_length_ms,
             "sample_rate": 48000,
             "format": "mp3",
             "size_bytes": len(audio_data),
@@ -179,10 +227,16 @@ def handler(job):
 
 # For local testing
 if __name__ == "__main__":
-    # Test with sample input
-    test_job = {
-        "input": {
-            "lyrics": """[Verse]
+    import runpod
+
+    # Test locally if no runpod
+    if os.environ.get("RUNPOD_POD_ID"):
+        runpod.serverless.start({"handler": handler})
+    else:
+        # Local test
+        test_job = {
+            "input": {
+                "lyrics": """[Verse]
 Hello world, this is a test
 Of the music generation
 Creating songs with AI
@@ -193,24 +247,19 @@ Music in the cloud
 Singing out loud
 RunPod generation
 A new creation""",
-            "tags": "pop,electronic,upbeat",
-            "max_audio_length_ms": 60000,
+                "tags": "pop,electronic,upbeat",
+                "max_audio_length_ms": 60000,
+            }
         }
-    }
 
-    result = handler(test_job)
+        result = handler(test_job)
 
-    if "error" in result:
-        print(f"Error: {result['error']}")
-    else:
-        print(f"Success! Generated {result['size_bytes']} bytes of audio")
-        print(f"Duration: {result['duration_ms']}ms, Sample rate: {result['sample_rate']}Hz")
+        if "error" in result:
+            print(f"Error: {result['error']}")
+        else:
+            print(f"Success! Generated {result['size_bytes']} bytes of audio")
 
-        # Optionally save the output for testing
-        with open("test_output.mp3", "wb") as f:
-            f.write(base64.b64decode(result["audio_base64"]))
-        print("Saved to test_output.mp3")
-
-
-# RunPod serverless entry point
-runpod.serverless.start({"handler": handler})
+            # Save the output
+            with open("test_output.mp3", "wb") as f:
+                f.write(base64.b64decode(result["audio_base64"]))
+            print("Saved to test_output.mp3")
