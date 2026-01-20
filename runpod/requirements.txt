@@ -1,0 +1,28 @@
+# RunPod Serverless Requirements
+# CUDA-optimized versions
+
+runpod>=1.6.0
+
+# Core ML dependencies (matching heartlib)
+torch==2.4.1
+torchaudio==2.4.1
+torchtune==0.4.0
+torchao==0.9.0
+torchvision==0.19.1
+transformers==4.57.0
+tokenizers==0.22.1
+
+# Optimization
+accelerate==1.12.0
+bitsandbytes==0.49.0
+
+# Audio processing
+soundfile
+tqdm==4.67.1
+
+# Additional dependencies
+numpy==2.0.2
+einops==0.8.1
+vector-quantize-pytorch==1.27.15
+safetensors
+huggingface_hub

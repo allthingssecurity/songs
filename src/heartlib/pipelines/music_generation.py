@@ -10,6 +10,7 @@ from tqdm import tqdm
 import torchaudio
 import json
 from transformers import BitsAndBytesConfig
+from contextlib import nullcontext
 
 
 @dataclass
@@ -149,7 +150,12 @@ class HeartMuLaGenPipeline(Pipeline):
 
         bs_size = 2 if cfg_scale != 1.0 else 1
         self.model.setup_caches(bs_size)
-        with torch.autocast(device_type=self.device.type, dtype=self.dtype):
+
+        # Use autocast only for CUDA, not for MPS or CPU
+        def get_autocast_ctx():
+            return torch.autocast(device_type=self.device.type, dtype=self.dtype) if self.device.type == "cuda" else nullcontext()
+
+        with get_autocast_ctx():
             curr_token = self.model.generate_frame(
                 tokens=prompt_tokens,
                 tokens_mask=prompt_tokens_mask,
@@ -183,7 +189,7 @@ class HeartMuLaGenPipeline(Pipeline):
 
         for i in tqdm(range(max_audio_frames)):
             curr_token, curr_token_mask = _pad_audio_token(curr_token)
-            with torch.autocast(device_type=self.device.type, dtype=self.dtype):
+            with get_autocast_ctx():
                 curr_token = self.model.generate_frame(
                     tokens=curr_token,
                     tokens_mask=curr_token_mask,
@@ -198,7 +204,7 @@ class HeartMuLaGenPipeline(Pipeline):
                 break
             frames.append(curr_token[0:1,])
         frames = torch.stack(frames).permute(1, 2, 0).squeeze(0)
-        wav = self.audio_codec.detokenize(frames)
+        wav = self.audio_codec.detokenize(frames, device=self.device)
         return {"wav": wav}
 
     def postprocess(self, model_outputs: Dict[str, Any], save_path: str):

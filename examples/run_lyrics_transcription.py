@@ -13,10 +13,22 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
+
+    # Select best available device and dtype
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+        dtype = torch.float16
+    elif torch.backends.mps.is_available():
+        device = torch.device("mps")
+        dtype = torch.float16
+    else:
+        device = torch.device("cpu")
+        dtype = torch.float32
+
     pipe = HeartTranscriptorPipeline.from_pretrained(
         args.model_path,
-        device=torch.device("cuda"),
-        dtype=torch.float16,
+        device=device,
+        dtype=dtype,
     )
     with torch.no_grad():
         result = pipe(
