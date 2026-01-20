@@ -1,0 +1,15 @@
+# RunPod minimal requirements (torch installed separately)
+runpod>=1.6.0
+transformers>=4.40.0
+tokenizers>=0.19.0
+accelerate>=1.0.0
+safetensors
+huggingface_hub
+soundfile
+tqdm
+numpy<2.0.0
+einops
+vector-quantize-pytorch
+torchtune
+torchao
+torchvision
